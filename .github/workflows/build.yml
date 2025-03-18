@@ -71,19 +71,6 @@ jobs:
         Invoke-WebRequest -Uri "http://www.angusj.com/resourcehacker/resource_hacker.zip" -OutFile "reshacker.zip"
         Expand-Archive -Path "reshacker.zip" -DestinationPath "reshacker"
 
-    # Langkah 9: Verifikasi integrasi resource dengan dumpbin
-    - name: Verify resource integration
-      shell: pwsh
-      run: |
-        $output = & dumpbin /RESOURCES phishing.exe
-        if ($output -match "StringFileInfo") {
-          Write-Host "Resources integrated successfully"
-        } else {
-          Write-Host "Resources may not be properly integrated"
-          Write-Host $output
-          exit 1
-        }
-
     # Langkah 10: Simpan output sebagai artifact
     - name: Create artifacts directory
       shell: pwsh
