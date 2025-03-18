@@ -12,24 +12,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     # Langkah 1: Checkout repository
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Langkah 2: Install dependencies (compiler C)
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential
-
     # Langkah 2: Install Chocolatey
     - name: Install Chocolatey
       shell: pwsh
       run: |
-        Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
         Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 
@@ -44,19 +37,14 @@ jobs:
       run: |
         echo "C:\tools\mingw64\bin" >> $env:GITHUB_PATH
 
-    # Langkah 3: Compile kode C
+    # Langkah 5: Compile kode C dan resource
     - name: Compile C code
       run: |
         make
 
-    # Langkah 4: Debugging - List files di direktori
-    - name: List files (debugging)
-      run: |
-        ls -la
-
-    # Langkah 5: Upload artifact (phishing.exe)
+    # Langkah 6: Upload artifact (phishing.exe)
     - name: Upload artifact (phishing.exe)
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: phishing.exe
         path: phishing.exe
