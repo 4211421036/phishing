@@ -62,7 +62,7 @@ jobs:
     - name: Verify with Resource Hacker
       shell: pwsh
       run: |
-        .\reshacker\ResourceHacker.exe -open phishing.exe -save info.txt -action extract -mask VERSIONINFO,, -log
+        .\reshacker\ResourceHacker.exe -open phishing.exe -save info.txt -action extract -mask "VERSIONINFO,," -log
         Get-Content info.txt
     
     - name: Ensure resource.rc is tracked
