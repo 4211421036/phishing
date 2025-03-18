@@ -54,18 +54,24 @@ jobs:
     
     # Langkah 7: Commit dan push file phishing.exe ke repositori
     - name: Commit and Push phishing.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        
-        # Buat direktori build jika belum ada
+        # Konfigurasi git
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+
+        # Pindahkan file phishing.exe ke direktori tertentu (opsional)
         mkdir -p build
-        
-        # Pindahkan file phishing.exe ke direktori build
-        Copy-Item phishing.exe -Destination build/phishing.exe -Force
-        
-        # Stage file
+        mv phishing.exe build/phishing.exe
+
+        # Stage file phishing.exe
         git add build/phishing.exe
-        
-        # Commit dan push jika ada perubahan
-        git diff --staged --quiet || (git commit -m "Auto-commit: Add compiled phishing.exe" && git push)
+
+        # Commit perubahan
+        if git diff --cached --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Auto-commit: Add compiled phishing.exe"
+          git push
+        fi
