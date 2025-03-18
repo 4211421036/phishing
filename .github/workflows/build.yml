@@ -15,45 +15,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # Langkah 1: Checkout repository
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
+    # Langkah 2: Install dependencies (compiler C)
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential
 
+    # Langkah 3: Compile kode C
     - name: Compile C code
       run: |
         make
 
+    # Langkah 4: Debugging - List files di direktori
     - name: List files (debugging)
       run: |
         ls -la
 
-    - name: Upload artifact (output.exe)
-      uses: actions/upload-artifact@v3
+    # Langkah 5: Upload artifact (phishing.exe)
+    - name: Upload artifact (phishing.exe)
+      uses: actions/upload-artifact@v4
       with:
-        name: output.exe
-        path: output.exe
+        name: phishing.exe
+        path: phishing.exe
 
-    - name: Commit and Push output.exe
+    # Langkah 6: Commit dan push file phishing.exe ke repositori
+    - name: Commit and Push phishing.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         # Konfigurasi git
         git config user.name "github-actions"
         git config user.email "github-actions@github.com"
 
-        # Pindahkan file output.exe ke direktori tertentu (opsional)
+        # Pindahkan file phishing.exe ke direktori tertentu (opsional)
         mkdir -p build
-        mv output.exe build/phishing.exe
+        mv phishing.exe build/phishing.exe
 
-        # Stage file output.exe
+        # Stage file phishing.exe
         git add build/phishing.exe
 
         # Commit perubahan
         if git diff --cached --quiet; then
           echo "No changes to commit"
         else
-          git commit -m "Auto-commit: Add compiled output.exe"
+          git commit -m "Auto-commit: Add compiled phishing.exe"
           git push
         fi
