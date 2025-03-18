@@ -8,10 +8,10 @@ RES = resource.o
 all: $(TARGET)
 
 $(TARGET): $(SRC) $(RES)
-    $(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(RES) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(RES) $(LDFLAGS)
 
 $(RES): resource.rc
-    windres resource.rc -o resource.o
+	windres resource.rc -o resource.o
 
 clean:
-    rm -f $(TARGET) $(RES)
+	rm -f $(TARGET) $(RES)
