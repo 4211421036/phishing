@@ -36,7 +36,7 @@ jobs:
         make
     # Langkah 6: Upload artifact (phishing.exe)
     - name: Upload artifact (phishing.exe)
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v2
       with:
         name: phishing.exe
         path: phishing.exe
