@@ -11,52 +11,61 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write # Memberikan izin eksplisit untuk menulis ke repositori
     steps:
-    # Langkah 1: Checkout repository
+    # Langkah 1: Checkout repository dengan versi terbaru
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Mengambil semua history untuk commit dan push
+    
     # Langkah 2: Install Chocolatey
     - name: Install Chocolatey
       shell: pwsh
       run: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
         Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    
     # Langkah 3: Install MinGW menggunakan Chocolatey
     - name: Install MinGW
       shell: pwsh
       run: |
         choco install mingw -y
+    
     # Langkah 4: Set PATH untuk MinGW
     - name: Set PATH for MinGW
+      shell: pwsh
       run: |
-        echo "C:\tools\mingw64\bin" >> $env:GITHUB_PATH
+        echo "C:\tools\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+    
     # Langkah 5: Compile kode C dan resource
     - name: Compile C code
       run: |
         make
-    # Langkah 6: Upload artifact (phishing.exe)
-    - name: Upload artifact (phishing.exe)
-      uses: actions/upload-artifact@v2
-      with:
-        name: phishing.exe
-        path: phishing.exe
+    
+    # Langkah 6: Simpan output sebagai artifact tanpa menggunakan actions/upload-artifact
+    - name: Create artifacts directory
+      shell: pwsh
+      run: |
+        mkdir -p ${{ github.workspace }}/artifacts
+        Copy-Item phishing.exe -Destination ${{ github.workspace }}/artifacts/
+    
     # Langkah 7: Commit dan push file phishing.exe ke repositori
     - name: Commit and Push phishing.exe
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # Konfigurasi git
-        git config user.name "github-actions"
-        git config user.email "github-actions@github.com"
-        # Pindahkan file phishing.exe ke direktori tertentu (opsional)
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # Buat direktori build jika belum ada
         mkdir -p build
-        mv phishing.exe build/phishing.exe
-        # Stage file phishing.exe
+        
+        # Pindahkan file phishing.exe ke direktori build
+        Copy-Item phishing.exe -Destination build/phishing.exe -Force
+        
+        # Stage file
         git add build/phishing.exe
-        # Commit perubahan
-        if git diff --cached --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "Auto-commit: Add compiled phishing.exe"
-          git push
-        fi
+        
+        # Commit dan push jika ada perubahan
+        git diff --staged --quiet || (git commit -m "Auto-commit: Add compiled phishing.exe" && git push)
