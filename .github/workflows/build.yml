@@ -17,7 +17,7 @@ jobs:
     steps:
     # Langkah 1: Checkout repository
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     # Langkah 2: Install Chocolatey
     - name: Install Chocolatey
