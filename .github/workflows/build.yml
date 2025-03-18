@@ -25,10 +25,24 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential
 
-    # Langkah 2: Install MinGW (termasuk windres)
+    # Langkah 2: Install Chocolatey
+    - name: Install Chocolatey
+      shell: pwsh
+      run: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+    # Langkah 3: Install MinGW menggunakan Chocolatey
     - name: Install MinGW
+      shell: pwsh
       run: |
         choco install mingw -y
+
+    # Langkah 4: Set PATH untuk MinGW
+    - name: Set PATH for MinGW
+      run: |
+        echo "C:\tools\mingw64\bin" >> $env:GITHUB_PATH
 
     # Langkah 3: Compile kode C
     - name: Compile C code
