@@ -1,55 +1,46 @@
 name: Build C Project
-
 on:
   schedule:
-    - cron: '*/5 * * * *' # Menjalankan setiap 1 menit, sesuaikan dengan kebutuhan Anda.
+    - cron: '*/5 * * * *' # Menjalankan setiap 5 menit
   push:
     branches:
       - main
   pull_request:
     branches:
       - main
-
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
     # Langkah 1: Checkout repository
     - name: Checkout repository
       uses: actions/checkout@v2
-
     # Langkah 2: Install Chocolatey
     - name: Install Chocolatey
       shell: pwsh
       run: |
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
         Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-
     # Langkah 3: Install MinGW menggunakan Chocolatey
     - name: Install MinGW
       shell: pwsh
       run: |
         choco install mingw -y
-
     # Langkah 4: Set PATH untuk MinGW
     - name: Set PATH for MinGW
       run: |
         echo "C:\tools\mingw64\bin" >> $env:GITHUB_PATH
-
     # Langkah 5: Compile kode C dan resource
     - name: Compile C code
       run: |
         make
-
     # Langkah 6: Upload artifact (phishing.exe)
     - name: Upload artifact (phishing.exe)
       uses: actions/upload-artifact@v3
       with:
         name: phishing.exe
         path: phishing.exe
-
-    # Langkah 6: Commit dan push file phishing.exe ke repositori
+    # Langkah 7: Commit dan push file phishing.exe ke repositori
     - name: Commit and Push phishing.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -57,14 +48,11 @@ jobs:
         # Konfigurasi git
         git config user.name "github-actions"
         git config user.email "github-actions@github.com"
-
         # Pindahkan file phishing.exe ke direktori tertentu (opsional)
         mkdir -p build
         mv phishing.exe build/phishing.exe
-
         # Stage file phishing.exe
         git add build/phishing.exe
-
         # Commit perubahan
         if git diff --cached --quiet; then
           echo "No changes to commit"
