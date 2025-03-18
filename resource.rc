@@ -15,7 +15,7 @@ BEGIN
             VALUE "FileDescription",  "Aplikasi Deteksi Phishing & Malware"
             VALUE "FileVersion",      "1.0.0.0"
             VALUE "InternalName",     "phishing.exe"
-            VALUE "LegalCopyright",   "Copyright (C) 2025 GALIH RIDHO UTOMO"
+            VALUE "LegalCopyright",   "2025 by GALIH RIDHO UTOMO"
             VALUE "OriginalFilename", "phishing.exe"
             VALUE "ProductName",      "Phishing Detector"
             VALUE "ProductVersion",   "1.0.0.0"
