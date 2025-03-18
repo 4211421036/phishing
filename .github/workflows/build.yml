@@ -71,6 +71,33 @@ jobs:
         Invoke-WebRequest -Uri "http://www.angusj.com/resourcehacker/resource_hacker.zip" -OutFile "reshacker.zip"
         Expand-Archive -Path "reshacker.zip" -DestinationPath "reshacker"
 
+    # Langkah 8: Verifikasi metadata dengan Resource Hacker
+    - name: Verify metadata with Resource Hacker
+      shell: pwsh
+      run: |
+        .\reshacker\ResourceHacker.exe -open phishing.exe -save info.txt -action extract -mask "VERSIONINFO,," -log reshacker.log
+        if (Test-Path info.txt) {
+          Write-Host "Metadata extracted successfully:"
+          Get-Content info.txt
+        } else {
+          Write-Host "Failed to extract metadata"
+          Get-Content reshacker.log
+          exit 1
+        }
+
+    # Langkah 9: Verifikasi integrasi resource dengan dumpbin
+    - name: Verify resource integration
+      shell: pwsh
+      run: |
+        $output = & dumpbin /RESOURCES phishing.exe
+        if ($output -match "StringFileInfo") {
+          Write-Host "Resources integrated successfully"
+        } else {
+          Write-Host "Resources may not be properly integrated"
+          Write-Host $output
+          exit 1
+        }
+
     # Langkah 10: Simpan output sebagai artifact
     - name: Create artifacts directory
       shell: pwsh
