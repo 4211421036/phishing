@@ -1,0 +1,24 @@
+#include "winver.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "CompanyName",      "GALIH RIDHO UTOMO"
+            VALUE "FileDescription",  "Aplikasi Deteksi Phishing & Malware"
+            VALUE "FileVersion",      "1.0.0.0"
+            VALUE "InternalName",     "phishing.exe"
+            VALUE "LegalCopyright",   "Copyright (C) 2025 GALIH RIDHO UTOMO"
+            VALUE "OriginalFilename", "phishing.exe"
+            VALUE "ProductName",      "Phishing Detector"
+            VALUE "ProductVersion",   "1.0.0.0"
+        END
+    END
+END
