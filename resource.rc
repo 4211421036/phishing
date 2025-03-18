@@ -9,7 +9,7 @@ FILESUBTYPE     VFT2_UNKNOWN
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        BLOCK "040904E4"
+        BLOCK "040904E4"  // Bahasa Inggris (Amerika Serikat) dan Unicode
         BEGIN
             VALUE "CompanyName",      "GALIH RIDHO UTOMO"
             VALUE "FileDescription",  "Aplikasi Deteksi Phishing & Malware"
@@ -20,5 +20,10 @@ BEGIN
             VALUE "ProductName",      "Phishing Detector"
             VALUE "ProductVersion",   "1.0.0.0"
         END
+    END
+
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1252  // Bahasa Inggris (Amerika Serikat) dan Unicode
     END
 END
