@@ -1,7 +1,7 @@
 name: Build C Project
 on:
   schedule:
-    - cron: '*/5 * * * *' # Menjalankan setiap 5 menit
+    - cron: '*/5 * * * *' # Menjalankan setiap 5 menit (format yang benar)
   push:
     branches:
       - main
@@ -49,27 +49,31 @@ jobs:
     - name: Create artifacts directory
       shell: pwsh
       run: |
-        mkdir -p ${{ github.workspace }}/artifacts
-        Copy-Item phishing.exe -Destination ${{ github.workspace }}/artifacts/
+        New-Item -Path "${{ github.workspace }}\artifacts" -ItemType Directory -Force
+        Copy-Item -Path "phishing.exe" -Destination "${{ github.workspace }}\artifacts\" -Force
     
     # Langkah 7: Commit dan push file phishing.exe ke repositori
-    - name: Commit and Push output.exe
+    - name: Commit and Push phishing.exe
+      shell: pwsh
       run: |
         # Konfigurasi git
         git config user.name "github-actions"
         git config user.email "github-actions@github.com"
-
-        # Pindahkan file output.exe ke direktori tertentu (opsional)
-        mkdir -p build
-        mv output.exe build/output.exe
-
-        # Stage file output.exe
-        git add build/output.exe
-
-        # Commit perubahan
-        if git diff --cached --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "Auto-commit: Add compiled output.exe"
+        
+        # Buat direktori build jika belum ada
+        New-Item -Path "build" -ItemType Directory -Force
+        
+        # Pindahkan file ke direktori build
+        Copy-Item -Path "phishing.exe" -Destination "build\phishing.exe" -Force
+        
+        # Stage file
+        git add build/phishing.exe
+        
+        # Commit perubahan dengan sintaks PowerShell yang benar
+        $hasChanges = git diff --cached --quiet
+        if ($LASTEXITCODE -ne 0) {
+          git commit -m "Auto-commit: Add compiled phishing.exe"
           git push
-        fi
+        } else {
+          Write-Host "No changes to commit"
+        }
