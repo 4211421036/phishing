@@ -75,19 +75,13 @@ jobs:
     - name: Verify metadata with Resource Hacker
       shell: pwsh
       run: |
-        # Jalankan Resource Hacker untuk mengekstrak metadata
         .\reshacker\ResourceHacker.exe -open phishing.exe -save info.txt -action extract -mask "VERSIONINFO,," -log reshacker.log
         if (Test-Path info.txt) {
           Write-Host "Metadata extracted successfully:"
           Get-Content info.txt
         } else {
           Write-Host "Failed to extract metadata"
-          if (Test-Path reshacker.log) {
-            Write-Host "Resource Hacker log:"
-            Get-Content reshacker.log
-          } else {
-            Write-Host "Resource Hacker log not found"
-          }
+          Get-Content reshacker.log
           exit 1
         }
 
