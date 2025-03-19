@@ -146,16 +146,21 @@ jobs:
         }
         
         # Compile dengan verbose output
-        $result = Invoke-Expression $compileCommand 2>&1
-        Write-Host "Compilation result: $result"
-        
-        if (Test-Path "build/phishing.exe") {
-            Write-Host "phishing.exe created successfully in build directory"
-            # Buat salinan di direktori utama untuk kompatibilitas dengan langkah berikutnya
-            Copy-Item -Path "build/phishing.exe" -Destination "phishing.exe" -Force
-        }
-        else {
-            Write-Host "Failed to create phishing.exe"
+        try {
+            Invoke-Expression $compileCommand 2>&1 | Tee-Object -Variable result
+            Write-Host "Compilation result: $result"
+            
+            if (Test-Path "build/phishing.exe") {
+                Write-Host "phishing.exe created successfully in build directory"
+                # Buat salinan di direktori utama untuk kompatibilitas dengan langkah berikutnya
+                Copy-Item -Path "build/phishing.exe" -Destination "phishing.exe" -Force
+            }
+            else {
+                Write-Host "Failed to create phishing.exe"
+                exit 1
+            }
+        } catch {
+            Write-Host "Compilation failed with error: $_"
             exit 1
         }
 
