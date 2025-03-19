@@ -110,63 +110,17 @@ jobs:
           exit 1
         }
 
-    - name: Compile Application
+    - name: Compile C code
       shell: pwsh
       run: |
-        Write-Host "Working directory: $(Get-Location)"
-        
-        # Tambahkan path GTK bin ke PATH untuk memudahkan link dinamis
-        $env:PATH += ";${{ env.GTK_DIR }}\bin;C:\vcpkg\installed\x64-windows\bin"
-        
-        # Dapatkan daftar file header dan library
-        Write-Host "GTK Include directory content:"
-        Get-ChildItem -Path "${{ env.GTK_INCLUDE }}" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
-        
-        # Definisikan perintah kompilasi sebagai satu string
-        $compileCommand = 'gcc main.c resource.o -o build/phishing.exe ' +
-                          '-I"${{ env.GTK_INCLUDE }}" ' +
-                          '-I"${{ env.GLIB_INCLUDE }}" ' +
-                          '-I"${{ env.GLIB_LIB_INCLUDE }}" ' +
-                          '-I"C:\vcpkg\installed\x64-windows\include" ' +
-                          '-I"${{ env.GTK_DIR }}\include\cairo" ' +
-                          '-I"${{ env.GTK_DIR }}\include\pango-1.0" ' +
-                          '-I"${{ env.GTK_DIR }}\include\atk-1.0" ' +
-                          '-I"${{ env.GTK_DIR }}\include\gdk-pixbuf-2.0" ' +
-                          '-L"${{ env.GTK_LIB_DIR }}" ' +
-                          '-L"C:\vcpkg\installed\x64-windows\lib" ' +
-                          '-lgtk-3 -lgobject-2.0 -lglib-2.0 -lgio-2.0 -lgdk-3 -lgdk_pixbuf-2.0 ' +
-                          '-lcairo -lpango-1.0 -lpangocairo-1.0 -lcurl -ljson-c ' +
-                          '-mwindows -Wl,-subsystem,windows'
-        
-        Write-Host "Compile command: $compileCommand"
-        
-        # Buat direktori build jika belum ada
-        if (-not (Test-Path "build")) {
-            New-Item -Path "build" -ItemType Directory -Force
+        gcc main.c resource.o -o phishing.exe -lm
+        if (Test-Path phishing.exe) {
+          Write-Host "phishing.exe created successfully"
+        } else {
+          Write-Host "Failed to create phishing.exe"
+          exit 1
         }
-        
-        # Jalankan perintah kompilasi menggunakan cmd.exe
-        try {
-            $process = Start-Process -NoNewWindow -FilePath "cmd.exe" -ArgumentList "/c $compileCommand" -PassThru -Wait
-            if ($process.ExitCode -eq 0) {
-                Write-Host "Compilation successful"
-                if (Test-Path "build/phishing.exe") {
-                    Write-Host "phishing.exe created successfully in build directory"
-                    # Buat salinan di direktori utama untuk kompatibilitas dengan langkah berikutnya
-                    Copy-Item -Path "build/phishing.exe" -Destination "phishing.exe" -Force
-                } else {
-                    Write-Host "Failed to create phishing.exe"
-                    exit 1
-                }
-            } else {
-                Write-Host "Compilation failed with exit code $($process.ExitCode)"
-                exit 1
-            }
-        } catch {
-            Write-Host "Compilation failed with error: $_"
-            exit 1
-        }
-
+    
     - name: Create artifacts directory
       shell: pwsh
       run: |
