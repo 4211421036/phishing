@@ -92,6 +92,30 @@ jobs:
         New-Item -Path "${{ github.workspace }}\artifacts" -ItemType Directory -Force
         Copy-Item -Path "phishing.exe" -Destination "${{ github.workspace }}\artifacts\" -Force
 
+    - name: Commit and Push phishing.exe
+      shell: pwsh
+      run: |
+        git config --global user.name "github-actions"
+        git config --global user.email "github-actions@github.com"
+        
+        # Create build directory if it doesn't exist
+        New-Item -Path "build" -ItemType Directory -Force
+        
+        # Copy the compiled executable to the build directory
+        Copy-Item -Path "phishing.exe" -Destination "build\phishing.exe" -Force
+        
+        # Add the file to git
+        git add build/phishing.exe
+        
+        # Check if there are changes to commit
+        $hasChanges = git diff --cached --quiet
+        if ($LASTEXITCODE -ne 0) {
+          git commit -m "Auto-commit: Add compiled phishing.exe"
+          git push
+        } else {
+          Write-Host "No changes to commit"
+        }
+
     - name: Create Release Body
       id: release_body
       shell: pwsh
