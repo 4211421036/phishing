@@ -65,15 +65,22 @@ jobs:
     - name: Compile Application
       shell: pwsh
       run: |
-        gcc main.c resource.o -o phishing.exe `
-          -IC:/tools/gtk3/include/gtk-3.0 `
-          -IC:/tools/gtk3/include/glib-2.0 `
-          -IC:/tools/gtk3/lib/glib-2.0/include `
-          -LC:/tools/gtk3/lib `
-          -LC:/vcpkg/installed/x64-windows/lib `
-          -lgtk-3 -lgobject-2.0 -lglib-2.0 `
-          -lcurl -ljson-c `
-          -mwindows -Wl,-subsystem,windows
+        $compileCommand = @(
+          "gcc",
+          "main.c",
+          "resource.o",
+          "-o", "phishing.exe",
+          "-IC:/tools/gtk3/include/gtk-3.0",
+          "-IC:/tools/gtk3/include/glib-2.0",
+          "-IC:/tools/gtk3/lib/glib-2.0/include",
+          "-LC:/tools/gtk3/lib",
+          "-LC:/vcpkg/installed/x64-windows/lib",
+          "-lgtk-3", "-lgobject-2.0", "-lglib-2.0",
+          "-lcurl", "-ljson-c",
+          "-mwindows", "-Wl,-subsystem,windows"
+        ) -join " "
+        
+        Invoke-Expression $compileCommand
 
         if (Test-Path phishing.exe) {
           Write-Host "phishing.exe created successfully"
