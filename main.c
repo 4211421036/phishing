@@ -1,24 +1,72 @@
+// PhishingMalwareDetector.c
+// Aplikasi GUI untuk deteksi phishing & malware berbasis GTK
+
+#include <gtk/gtk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <curl/curl.h>
+#include <json-c/json.h>
+#include <pthread.h>
 
 #define MAX_URL_LENGTH 1024
 #define MAX_BUFFER_SIZE 8192
 #define MAX_PATH_LENGTH 512
 #define SAMPLE_SIZE 256
+#define APP_VERSION "1.0.0"
+#define GITHUB_API_URL "https://api.github.com/repos/4211421036/phishing/releases/latest"
 
 // Thresholds berdasarkan jurnal
 #define ENTROPY_THRESHOLD_HIGH 7.0
 #define ENTROPY_THRESHOLD_LOW 6.0
-#define SUSPICIOUS_EXTENSIONS_COUNT 5
+#define SUSPICIOUS_EXTENSIONS_COUNT 8
 
 // Ekstensi yang mencurigakan
 const char* suspicious_extensions[] = {
     ".exe", ".apk", ".bat", ".cmd", ".msi", ".js", ".vbs", ".scr"
 };
+
+typedef struct {
+    GtkWidget *window;
+    GtkWidget *notebook;
+    GtkWidget *url_entry;
+    GtkWidget *url_result_label;
+    GtkWidget *file_chooser_button;
+    GtkWidget *file_result_label;
+    GtkWidget *dir_chooser_button;
+    GtkWidget *dir_result_textview;
+    GtkWidget *scan_progress;
+    GtkWidget *status_bar;
+    GtkTextBuffer *dir_result_buffer;
+} AppWidgets;
+
+typedef struct {
+    char *data;
+    size_t size;
+} UpdateData;
+
+typedef struct {
+    const char *directory;
+    AppWidgets *widgets;
+    GtkTextBuffer *buffer;
+} ScanDirThreadData;
+
+// Prototype fungsi
+double calculate_shannon_entropy(unsigned char* data, size_t size);
+double calculate_renyi_entropy(unsigned char* data, size_t size, double alpha);
+double calculate_tsallis_entropy(unsigned char* data, size_t size, double q);
+int is_suspicious_url(const char* url);
+int has_suspicious_extension(const char* filename);
+int is_suspicious_file(const char* filename);
+int is_suspicious_pdf(const char* filename);
+int check_file(const char* filename);
+void* scan_directory_thread(void *arg);
+static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp);
+void check_for_updates();
+gboolean update_progress_bar(gpointer data);
 
 // Fungsi untuk menghitung entropi Shannon
 double calculate_shannon_entropy(unsigned char* data, size_t size) {
@@ -179,7 +227,6 @@ int is_suspicious_file(const char* filename) {
     free(full_content);
     
     // Berdasarkan penelitian, entropi tinggi pada header dan konten penuh menunjukkan file terenkripsi
-    // yang mungkin berbahaya seperti file ransomware
     double header_diff = 7.0 - avg_entropy_header;
     double full_diff = 8.0 - avg_entropy_full;
     double total_diff = header_diff + full_diff;
@@ -258,7 +305,6 @@ int check_file(const char* filename) {
     // Periksa ekstensi file
     const char* extension = strrchr(filename, '.');
     if (!extension) {
-        printf("Error: File tidak memiliki ekstensi\n");
         return -1;
     }
     
@@ -271,19 +317,53 @@ int check_file(const char* filename) {
     return is_suspicious_file(filename);
 }
 
-// Fungsi untuk memeriksa direktori
-void scan_directory(const char* directory) {
+// Fungsi callback untuk update progress bar
+gboolean update_progress_bar(gpointer data) {
+    GtkWidget *progress_bar = (GtkWidget *)data;
+    static gdouble fraction = 0.0;
+    
+    // Update progress bar
+    fraction += 0.01;
+    if (fraction > 1.0) fraction = 0.0;
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), fraction);
+    
+    return TRUE;  // Continue calling
+}
+
+// Fungsi thread untuk scan direktori
+void* scan_directory_thread(void *arg) {
+    ScanDirThreadData *thread_data = (ScanDirThreadData *)arg;
+    const char* directory = thread_data->directory;
+    GtkTextBuffer *buffer = thread_data->buffer;
+    AppWidgets *widgets = thread_data->widgets;
+    
     DIR* dir;
     struct dirent* entry;
     char path[MAX_PATH_LENGTH];
+    char message[MAX_BUFFER_SIZE];
+    GtkTextIter iter;
+    
+    // Set status
+    gdk_threads_enter();
+    gtk_text_buffer_get_end_iter(buffer, &iter);
+    gtk_text_buffer_insert(buffer, &iter, "Scanning direktori...\n", -1);
+    gdk_threads_leave();
     
     if (!(dir = opendir(directory))) {
-        printf("Error: Tidak dapat membuka direktori %s\n", directory);
-        return;
+        gdk_threads_enter();
+        gtk_text_buffer_get_end_iter(buffer, &iter);
+        sprintf(message, "Error: Tidak dapat membuka direktori %s\n", directory);
+        gtk_text_buffer_insert(buffer, &iter, message, -1);
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widgets->scan_progress), 0.0);
+        gdk_threads_leave();
+        free(thread_data);
+        return NULL;
     }
     
-    printf("Scanning direktori %s...\n", directory);
+    // Mulai timer untuk progress bar
+    guint timer_id = g_timeout_add(50, update_progress_bar, widgets->scan_progress);
     
+    // Scan direktori
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
@@ -293,79 +373,462 @@ void scan_directory(const char* directory) {
         
         // Periksa file
         int result = check_file(path);
+        
+        // Update UI
+        gdk_threads_enter();
+        gtk_text_buffer_get_end_iter(buffer, &iter);
+        
         if (result == 1) {
-            printf("PERINGATAN: File %s mencurigakan (kemungkinan phishing atau malware)!\n", path);
+            sprintf(message, "⚠️ PERINGATAN: File %s mencurigakan (kemungkinan phishing/malware)!\n", path);
+            gtk_text_buffer_insert_with_tags_by_name(buffer, &iter, message, -1, "warning", NULL);
         } else if (result == 0) {
-            printf("File %s aman.\n", path);
+            sprintf(message, "✅ File %s aman.\n", path);
+            gtk_text_buffer_insert_with_tags_by_name(buffer, &iter, message, -1, "safe", NULL);
+        } else {
+            sprintf(message, "❓ File %s tidak dapat diperiksa.\n", path);
+            gtk_text_buffer_insert_with_tags_by_name(buffer, &iter, message, -1, "error", NULL);
         }
+        
+        // Scroll ke bawah
+        GtkTextMark *mark = gtk_text_buffer_get_insert(buffer);
+        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(widgets->dir_result_textview), mark, 0.0, TRUE, 0.5, 0.5);
+        
+        gdk_threads_leave();
     }
     
     closedir(dir);
-    printf("Scanning selesai.\n");
+    
+    // Stop timer dan update UI
+    g_source_remove(timer_id);
+    
+    gdk_threads_enter();
+    gtk_text_buffer_get_end_iter(buffer, &iter);
+    gtk_text_buffer_insert(buffer, &iter, "\n✨ Scanning selesai!\n", -1);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widgets->scan_progress), 1.0);
+    gtk_statusbar_push(GTK_STATUSBAR(widgets->status_bar), 0, "Scanning selesai");
+    gdk_threads_leave();
+    
+    free(thread_data);
+    return NULL;
 }
 
-int main() {
-    int choice;
-    char url[MAX_URL_LENGTH];
-    char filepath[MAX_PATH_LENGTH];
-    char directory[MAX_PATH_LENGTH];
+// Fungsi callback untuk URL check button
+static void on_check_url_clicked(GtkButton *button, AppWidgets *widgets) {
+    const gchar *url = gtk_entry_get_text(GTK_ENTRY(widgets->url_entry));
     
-    printf("========= Aplikasi Deteksi Phishing & Malware =========\n");
-    printf("Aplikasi ini menggunakan metode entropy-based untuk deteksi file berbahaya\n");
-    printf("Referensi: Entropy Based Method for Malicious File Detection\n\n");
-    
-    while (1) {
-        printf("\nPilih opsi:\n");
-        printf("1. Periksa URL\n");
-        printf("2. Periksa File\n");
-        printf("3. Scan Direktori\n");
-        printf("4. Keluar\n");
-        printf("Pilihan Anda: ");
-        scanf("%d", &choice);
-        getchar(); // Membersihkan buffer
-        
-        switch (choice) {
-            case 1:
-                printf("Masukkan URL untuk diperiksa: ");
-                fgets(url, MAX_URL_LENGTH, stdin);
-                url[strcspn(url, "\n")] = 0; // Hapus newline
-                
-                if (is_suspicious_url(url)) {
-                    printf("URL tersebut mencurigakan! Kemungkinan besar phishing.\n");
-                } else {
-                    printf("URL tersebut tampaknya aman.\n");
-                }
-                break;
-                
-            case 2:
-                printf("Masukkan path file untuk diperiksa: ");
-                fgets(filepath, MAX_PATH_LENGTH, stdin);
-                filepath[strcspn(filepath, "\n")] = 0; // Hapus newline
-                
-                int result = check_file(filepath);
-                if (result == 1) {
-                    printf("PERINGATAN: File mencurigakan! Kemungkinan phishing atau malware.\n");
-                } else if (result == 0) {
-                    printf("File tampaknya aman.\n");
-                }
-                break;
-                
-            case 3:
-                printf("Masukkan path direktori untuk di-scan: ");
-                fgets(directory, MAX_PATH_LENGTH, stdin);
-                directory[strcspn(directory, "\n")] = 0; // Hapus newline
-                
-                scan_directory(directory);
-                break;
-                
-            case 4:
-                printf("Terima kasih telah menggunakan aplikasi ini.\n");
-                return 0;
-                
-            default:
-                printf("Pilihan tidak valid. Coba lagi.\n");
-        }
+    if (strlen(url) == 0) {
+        gtk_label_set_markup(GTK_LABEL(widgets->url_result_label), "Silahkan masukkan URL");
+        return;
     }
     
-    return 0;
+    gtk_statusbar_push(GTK_STATUSBAR(widgets->status_bar), 0, "Memeriksa URL...");
+    
+    // Periksa URL
+    if (is_suspicious_url(url)) {
+        gtk_label_set_markup(GTK_LABEL(widgets->url_result_label), 
+            "<span foreground='red' weight='bold'>⚠️ URL mencurigakan! Kemungkinan Phishing!</span>");
+    } else {
+        gtk_label_set_markup(GTK_LABEL(widgets->url_result_label), 
+            "<span foreground='green' weight='bold'>✅ URL tampaknya aman</span>");
+    }
+    
+    gtk_statusbar_push(GTK_STATUSBAR(widgets->status_bar), 0, "URL sudah diperiksa");
+}
+
+// Fungsi callback untuk File check button
+static void on_check_file_clicked(GtkButton *button, AppWidgets *widgets) {
+    gchar *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(widgets->file_chooser_button));
+    
+    if (!filename) {
+        gtk_label_set_markup(GTK_LABEL(widgets->file_result_label), "Silahkan pilih file");
+        return;
+    }
+    
+    gtk_statusbar_push(GTK_STATUSBAR(widgets->status_bar), 0, "Memeriksa file...");
+    
+    // Reset progress bar dan start animation
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widgets->scan_progress), 0.0);
+    guint timer_id = g_timeout_add(50, update_progress_bar, widgets->scan_progress);
+    
+    // Periksa file
+    int result = check_file(filename);
+    
+    // Stop animation
+    g_source_remove(timer_id);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widgets->scan_progress), 1.0);
+    
+    if (result == 1) {
+        gtk_label_set_markup(GTK_LABEL(widgets->file_result_label), 
+            "<span foreground='red' weight='bold'>⚠️ File mencurigakan! Kemungkinan phishing atau malware!</span>");
+    } else if (result == 0) {
+        gtk_label_set_markup(GTK_LABEL(widgets->file_result_label), 
+            "<span foreground='green' weight='bold'>✅ File tampaknya aman</span>");
+    } else {
+        gtk_label_set_markup(GTK_LABEL(widgets->file_result_label), 
+            "<span foreground='orange' weight='bold'>❓ File tidak dapat diperiksa</span>");
+    }
+    
+    g_free(filename);
+    gtk_statusbar_push(GTK_STATUSBAR(widgets->status_bar), 0, "File sudah diperiksa");
+}
+
+// Fungsi callback untuk Directory scan button
+static void on_scan_directory_clicked(GtkButton *button, AppWidgets *widgets) {
+    gchar *dirname = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(widgets->dir_chooser_button));
+    
+    if (!dirname) {
+        GtkTextIter iter;
+        gtk_text_buffer_get_end_iter(widgets->dir_result_buffer, &iter);
+        gtk_text_buffer_insert(widgets->dir_result_buffer, &iter, "Silahkan pilih direktori\n", -1);
+        return;
+    }
+    
+    // Clear previous results
+    gtk_text_buffer_set_text(widgets->dir_result_buffer, "", -1);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widgets->scan_progress), 0.0);
+    
+    gtk_statusbar_push(GTK_STATUSBAR(widgets->status_bar), 0, "Scanning direktori...");
+    
+    // Create thread data
+    ScanDirThreadData *thread_data = malloc(sizeof(ScanDirThreadData));
+    thread_data->directory = dirname;
+    thread_data->buffer = widgets->dir_result_buffer;
+    thread_data->widgets = widgets;
+    
+    // Create and start scan thread
+    pthread_t scan_thread;
+    pthread_create(&scan_thread, NULL, scan_directory_thread, thread_data);
+    pthread_detach(scan_thread);
+}
+
+// Callback untuk curl
+static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    UpdateData *mem = (UpdateData *)userp;
+    
+    char *ptr = realloc(mem->data, mem->size + realsize + 1);
+    if(!ptr) {
+        printf("not enough memory (realloc returned NULL)\n");
+        return 0;
+    }
+    
+    mem->data = ptr;
+    memcpy(&(mem->data[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->data[mem->size] = 0;
+    
+    return realsize;
+}
+
+// Fungsi untuk memeriksa update
+void check_for_updates() {
+    CURL *curl;
+    CURLcode res;
+    UpdateData update_data;
+    
+    update_data.data = malloc(1);
+    update_data.size = 0;
+    
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl = curl_easy_init();
+    
+    if(curl) {
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "User-Agent: PhishingDetector/1.0");
+        
+        curl_easy_setopt(curl, CURLOPT_URL, GITHUB_API_URL);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&update_data);
+        
+        res = curl_easy_perform(curl);
+        
+        if(res == CURLE_OK) {
+            // Parse JSON response
+            struct json_object *parsed_json;
+            struct json_object *tag_name;
+            
+            parsed_json = json_tokener_parse(update_data.data);
+            
+            if (json_object_object_get_ex(parsed_json, "tag_name", &tag_name)) {
+                const char *latest_version = json_object_get_string(tag_name);
+                
+                // Remove 'v' prefix if present
+                if (latest_version[0] == 'v') {
+                    latest_version++;
+                }
+                
+                // Compare versions
+                if (strcmp(latest_version, APP_VERSION) > 0) {
+                    GtkWidget *dialog = gtk_message_dialog_new(NULL,
+                        GTK_DIALOG_MODAL,
+                        GTK_MESSAGE_INFO,
+                        GTK_BUTTONS_YES_NO,
+                        "Tersedia update baru (v%s). Versi Anda saat ini v%s.\n\nApakah Anda ingin mengunduh update terbaru?",
+                        latest_version, APP_VERSION);
+                    
+                    gtk_window_set_title(GTK_WINDOW(dialog), "Update Tersedia");
+                    
+                    int result = gtk_dialog_run(GTK_DIALOG(dialog));
+                    if (result == GTK_RESPONSE_YES) {
+                        // Open download URL in browser
+                        struct json_object *html_url;
+                        if (json_object_object_get_ex(parsed_json, "html_url", &html_url)) {
+                            const char *download_url = json_object_get_string(html_url);
+                            char command[2048];
+                            
+                            #ifdef _WIN32
+                            sprintf(command, "start %s", download_url);
+                            #elif __APPLE__
+                            sprintf(command, "open %s", download_url);
+                            #else
+                            sprintf(command, "xdg-open %s", download_url);
+                            #endif
+                            
+                            system(command);
+                        }
+                    }
+                    
+                    gtk_widget_destroy(dialog);
+                }
+                
+                json_object_put(parsed_json);
+            }
+        } else {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+        
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+    
+    curl_global_cleanup();
+    free(update_data.data);
+}
+
+// Fungsi untuk membuat tab URL Check
+GtkWidget* create_url_check_tab(AppWidgets *widgets) {
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 20);
+    
+    // URL Entry
+    GtkWidget *url_label = gtk_label_new("URL yang akan diperiksa:");
+    gtk_widget_set_halign(url_label, GTK_ALIGN_START);
+    
+    widgets->url_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(widgets->url_entry), "Masukkan URL di sini...");
+    gtk_widget_set_hexpand(widgets->url_entry, TRUE);
+    
+    GtkWidget *check_url_button = gtk_button_new_with_label("Periksa URL");
+    g_signal_connect(check_url_button, "clicked", G_CALLBACK(on_check_url_clicked), widgets);
+    
+    // Result Label
+    widgets->url_result_label = gtk_label_new("");
+    gtk_label_set_selectable(GTK_LABEL(widgets->url_result_label), TRUE);
+    
+    // Banner image - shield icon
+    GtkWidget *banner = gtk_image_new_from_icon_name("security-high", GTK_ICON_SIZE_DIALOG);
+    gtk_widget_set_margin_bottom(banner, 20);
+    
+    // Banner label
+    GtkWidget *banner_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(banner_label), 
+        "<span font_weight='bold' font_size='large'>URL Phishing Detector</span>");
+    gtk_widget_set_margin_bottom(banner_label, 10);
+    
+    // Info label
+    GtkWidget *info_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(info_label), 
+        "<span font_style='italic'>Scan URL untuk memeriksa apakah URL tersebut mencurigakan dan berpotensi phishing.</span>");
+    gtk_widget_set_margin_bottom(info_label, 20);
+    
+    // Layout
+    gtk_grid_attach(GTK_GRID(grid), banner, 0, 0, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), banner_label, 0, 1, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), info_label, 0, 2, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), url_label, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), widgets->url_entry, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), check_url_button, 2, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), widgets->url_result_label, 0, 4, 3, 1);
+    
+    return grid;
+}
+
+// Fungsi untuk membuat tab File Check
+// Fungsi untuk membuat tab File Check (lanjutan)
+GtkWidget* create_file_check_tab(AppWidgets *widgets) {
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 20);
+
+    // File Chooser
+    GtkWidget *file_label = gtk_label_new("File yang akan diperiksa:");
+    gtk_widget_set_halign(file_label, GTK_ALIGN_START);
+
+    widgets->file_chooser_button = gtk_file_chooser_button_new("Pilih File", GTK_FILE_CHOOSER_ACTION_OPEN);
+    gtk_widget_set_hexpand(widgets->file_chooser_button, TRUE);
+
+    GtkWidget *check_file_button = gtk_button_new_with_label("Periksa File");
+    g_signal_connect(check_file_button, "clicked", G_CALLBACK(on_check_file_clicked), widgets);
+
+    // Result Label
+    widgets->file_result_label = gtk_label_new("");
+    gtk_label_set_selectable(GTK_LABEL(widgets->file_result_label), TRUE);
+
+    // Banner image
+    GtkWidget *banner = gtk_image_new_from_icon_name("document-send", GTK_ICON_SIZE_DIALOG);
+    gtk_widget_set_margin_bottom(banner, 20);
+
+    // Banner label
+    GtkWidget *banner_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(banner_label), 
+        "<span font_weight='bold' font_size='large'>File Malware Detector</span>");
+    gtk_widget_set_margin_bottom(banner_label, 10);
+
+    // Info label
+    GtkWidget *info_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(info_label), 
+        "<span font_style='italic'>Scan file untuk memeriksa apakah file tersebut mengandung malware atau konten berbahaya.</span>");
+    gtk_widget_set_margin_bottom(info_label, 20);
+
+    // Layout
+    gtk_grid_attach(GTK_GRID(grid), banner, 0, 0, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), banner_label, 0, 1, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), info_label, 0, 2, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), file_label, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), widgets->file_chooser_button, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), check_file_button, 2, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), widgets->file_result_label, 0, 4, 3, 1);
+
+    return grid;
+}
+
+// Fungsi untuk membuat tab Directory Scan
+GtkWidget* create_directory_scan_tab(AppWidgets *widgets) {
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 20);
+
+    // Directory Chooser
+    GtkWidget *dir_label = gtk_label_new("Direktori yang akan di-scan:");
+    gtk_widget_set_halign(dir_label, GTK_ALIGN_START);
+
+    widgets->dir_chooser_button = gtk_file_chooser_button_new("Pilih Direktori", GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
+    gtk_widget_set_hexpand(widgets->dir_chooser_button, TRUE);
+
+    GtkWidget *scan_button = gtk_button_new_with_label("Mulai Scan");
+    g_signal_connect(scan_button, "clicked", G_CALLBACK(on_scan_directory_clicked), widgets);
+
+    // Result Textview
+    widgets->dir_result_textview = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(widgets->dir_result_textview), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(widgets->dir_result_textview), GTK_WRAP_WORD);
+    
+    GtkWidget *scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
+        GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(scrolled_window), widgets->dir_result_textview);
+
+    widgets->dir_result_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(widgets->dir_result_textview));
+
+    // Progress Bar
+    widgets->scan_progress = gtk_progress_bar_new();
+    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(widgets->scan_progress), TRUE);
+
+    // Layout
+    gtk_grid_attach(GTK_GRID(grid), dir_label, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), widgets->dir_chooser_button, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), scan_button, 2, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), scrolled_window, 0, 1, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), widgets->scan_progress, 0, 2, 3, 1);
+
+    return grid;
+}
+
+// Fungsi untuk membuat menu
+GtkWidget* create_menu_bar(AppWidgets *widgets) {
+    GtkWidget *menu_bar = gtk_menu_bar_new();
+    
+    // Menu File
+    GtkWidget *file_menu = gtk_menu_new();
+    GtkWidget *file_item = gtk_menu_item_new_with_label("File");
+    GtkWidget *exit_item = gtk_menu_item_new_with_label("Keluar");
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), exit_item);
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_item), file_menu);
+    
+    // Menu Help
+    GtkWidget *help_menu = gtk_menu_new();
+    GtkWidget *help_item = gtk_menu_item_new_with_label("Bantuan");
+    GtkWidget *about_item = gtk_menu_item_new_with_label("Tentang");
+    GtkWidget *update_item = gtk_menu_item_new_with_label("Periksa Update");
+    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), about_item);
+    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), update_item);
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(help_item), help_menu);
+    
+    // Signal connections
+    g_signal_connect(exit_item, "activate", G_CALLBACK(gtk_main_quit), NULL);
+    g_signal_connect(about_item, "activate", G_CALLBACK(show_about_dialog), widgets);
+    g_signal_connect(update_item, "activate", G_CALLBACK(check_for_updates), NULL);
+    
+    // Add to menu bar
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), file_item);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), help_item);
+    
+    return menu_bar;
+}
+
+// Fungsi utama untuk membuat window
+void activate(GtkApplication *app, gpointer user_data) {
+    AppWidgets *widgets = g_new(AppWidgets, 1);
+    
+    // Create main window
+    widgets->window = gtk_application_window_new(app);
+    gtk_window_set_title(GTK_WINDOW(widgets->window), "Phishing & Malware Detector");
+    gtk_window_set_default_size(GTK_WINDOW(widgets->window), 800, 600);
+    
+    // Create main container
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_container_add(GTK_CONTAINER(widgets->window), vbox);
+    
+    // Create menu
+    GtkWidget *menu_bar = create_menu_bar(widgets);
+    gtk_box_pack_start(GTK_BOX(vbox), menu_bar, FALSE, FALSE, 0);
+    
+    // Create notebook (tab container)
+    widgets->notebook = gtk_notebook_new();
+    gtk_box_pack_start(GTK_BOX(vbox), widgets->notebook, TRUE, TRUE, 0);
+    
+    // Create tabs
+    GtkWidget *url_tab = create_url_check_tab(widgets);
+    GtkWidget *file_tab = create_file_check_tab(widgets);
+    GtkWidget *dir_tab = create_directory_scan_tab(widgets);
+    
+    // Add tabs to notebook
+    gtk_notebook_append_page(GTK_NOTEBOOK(widgets->notebook), url_tab, gtk_label_new("URL Check"));
+    gtk_notebook_append_page(GTK_NOTEBOOK(widgets->notebook), file_tab, gtk_label_new("File Check"));
+    gtk_notebook_append_page(GTK_NOTEBOOK(widgets->notebook), dir_tab, gtk_label_new("Directory Scan"));
+    
+    // Status bar
+    widgets->status_bar = gtk_statusbar_new();
+    gtk_box_pack_end(GTK_BOX(vbox), widgets->status_bar, FALSE, FALSE, 0);
+    
+    // Show all widgets
+    gtk_widget_show_all(widgets->window);
+    
+    // Check for updates on startup
+    check_for_updates();
+}
+
+int main(int argc, char **argv) {
+    GtkApplication *app = gtk_application_new("com.pelajaran.phishingdetector", G_APPLICATION_FLAGS_NONE);
+    g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
+    
+    int status = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
+    
+    return status;
 }
