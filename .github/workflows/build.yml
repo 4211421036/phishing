@@ -2,7 +2,7 @@ name: Build and Release C Project
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # Diubah menjadi setiap 6 jam untuk mengurangi beban
+    - cron: '0 */6 * * *'
   push:
     branches: [ "main" ]
     tags: [ "v*" ]
