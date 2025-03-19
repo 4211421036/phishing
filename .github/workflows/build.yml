@@ -1,40 +1,41 @@
-name: Build C Project
+name: Build and Release C Project
+
 on:
   schedule:
-    - cron: '*/5 * * * *' # Menjalankan setiap 5 menit
+    - cron: '*/5 * * * *' # Menjalankan setiap 1 menit, sesuaikan dengan kebutuhan Anda.
   push:
-    branches:
-      - main
+    branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
-    branches:
-      - main
+    branches: [ "main" ]
+
 jobs:
   build:
     runs-on: windows-latest
     permissions:
       contents: write
+      packages: write
+      
     steps:
-    # Langkah 1: Checkout repository
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    # Langkah 2: Install Chocolatey
-    - name: Install Chocolatey
+    - name: Install Dependencies
       shell: pwsh
       run: |
+        # Install Chocolatey
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        
+        # Install build tools
+        choco install -y mingw curl
+        choco install -y --pre gtk3
+        choco install -y vcpkg
+        vcpkg install json-c
 
-    # Langkah 3: Install MinGW menggunakan Chocolatey
-    - name: Install MinGW
-      shell: pwsh
-      run: |
-        choco install -y mingw gtk3 curl json-c
-
-    # Langkah 4: Set PATH untuk MinGW
     - name: Setup Environment
       shell: pwsh
       run: |
@@ -45,7 +46,11 @@ jobs:
         $env:PKG_CONFIG_PATH = "C:\tools\gtk3\lib\pkgconfig"
         echo "PKG_CONFIG_PATH=$env:PKG_CONFIG_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-    # Langkah 5: Kompilasi resource file
+        # Add vcpkg to PATH
+        echo "C:\vcpkg\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "C:\vcpkg\installed\x64-windows\include" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "C:\vcpkg\installed\x64-windows\lib" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
     - name: Compile resource file
       shell: pwsh
       run: |
@@ -60,20 +65,16 @@ jobs:
     - name: Compile Application
       shell: pwsh
       run: |
-        gcc main.c -o phishing.exe `
+        gcc main.c resource.o -o phishing.exe `
           -IC:/tools/gtk3/include/gtk-3.0 `
           -IC:/tools/gtk3/include/glib-2.0 `
           -IC:/tools/gtk3/lib/glib-2.0/include `
           -LC:/tools/gtk3/lib `
+          -LC:/vcpkg/installed/x64-windows/lib `
           -lgtk-3 -lgobject-2.0 -lglib-2.0 `
           -lcurl -ljson-c `
           -mwindows -Wl,-subsystem,windows
-    
-    # Langkah 6: Kompilasi program C
-    - name: Compile C code
-      shell: pwsh
-      run: |
-        gcc main.c resource.o -o phishing.exe -lm
+
         if (Test-Path phishing.exe) {
           Write-Host "phishing.exe created successfully"
         } else {
@@ -81,36 +82,11 @@ jobs:
           exit 1
         }
 
-    # Langkah 7: Install Resource Hacker
-    - name: Install Resource Hacker
-      shell: pwsh
-      run: |
-        Invoke-WebRequest -Uri "http://www.angusj.com/resourcehacker/resource_hacker.zip" -OutFile "reshacker.zip"
-        Expand-Archive -Path "reshacker.zip" -DestinationPath "reshacker"
-
-    # Langkah 10: Simpan output sebagai artifact
     - name: Create artifacts directory
       shell: pwsh
       run: |
         New-Item -Path "${{ github.workspace }}\artifacts" -ItemType Directory -Force
         Copy-Item -Path "phishing.exe" -Destination "${{ github.workspace }}\artifacts\" -Force
-
-    # Langkah 11: Commit dan push file phishing.exe ke repositori
-    - name: Commit and Push phishing.exe
-      shell: pwsh
-      run: |
-        git config user.name "github-actions"
-        git config user.email "github-actions@github.com"
-        New-Item -Path "build" -ItemType Directory -Force
-        Copy-Item -Path "phishing.exe" -Destination "build\phishing.exe" -Force
-        git add build/phishing.exe
-        $hasChanges = git diff --cached --quiet
-        if ($LASTEXITCODE -ne 0) {
-          git commit -m "Auto-commit: Add compiled phishing.exe"
-          git push
-        } else {
-          Write-Host "No changes to commit"
-        }
 
     - name: Create Release Body
       id: release_body
