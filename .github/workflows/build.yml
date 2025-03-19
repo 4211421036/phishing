@@ -2,7 +2,7 @@ name: Build and Release C Project
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *' # Diubah menjadi setiap 6 jam untuk mengurangi beban
   push:
     branches: [ "main" ]
     tags: [ "v*" ]
@@ -40,7 +40,7 @@ jobs:
         
         # Install vcpkg and json-c
         choco install -y vcpkg
-        vcpkg install json-c
+        vcpkg install json-c:x64-windows
 
     - name: Setup Environment
       shell: pwsh
@@ -95,11 +95,89 @@ jobs:
           exit 1
         }
 
+    - name: Compile resource file
+      shell: pwsh
+      run: |
+        Write-Host "Working directory: $(Get-Location)"
+        Write-Host "Files in directory:"
+        Get-ChildItem -Path "." | ForEach-Object { Write-Host $_.FullName }
+        
+        windres -i resource.rc -o resource.o
+        if (Test-Path resource.o) {
+          Write-Host "Resource file compiled successfully"
+        } else {
+          Write-Host "Resource file compilation failed"
+          exit 1
+        }
+
+    - name: Compile Application
+      shell: pwsh
+      run: |
+        Write-Host "Working directory: $(Get-Location)"
+        
+        # Tambahkan path GTK bin ke PATH untuk memudahkan link dinamis
+        $env:PATH += ";${{ env.GTK_DIR }}\bin;C:\vcpkg\installed\x64-windows\bin"
+        
+        # Dapatkan daftar file header dan library
+        Write-Host "GTK Include directory content:"
+        Get-ChildItem -Path "${{ env.GTK_INCLUDE }}" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+        
+        # Compile dengan verbose output
+        $compileCommand = "gcc main.c resource.o -o build/phishing.exe"
+        $compileCommand += " -I`"${{ env.GTK_INCLUDE }}`""
+        $compileCommand += " -I`"${{ env.GLIB_INCLUDE }}`""
+        $compileCommand += " -I`"${{ env.GLIB_LIB_INCLUDE }}`""
+        $compileCommand += " -I`"C:\vcpkg\installed\x64-windows\include`""
+        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\cairo`""
+        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\pango-1.0`""
+        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\atk-1.0`""
+        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\gdk-pixbuf-2.0`""
+        $compileCommand += " -L`"${{ env.GTK_LIB_DIR }}`""
+        $compileCommand += " -L`"C:\vcpkg\installed\x64-windows\lib`""
+        $compileCommand += " -lgtk-3 -lgobject-2.0 -lglib-2.0 -lgio-2.0 -lgdk-3 -lgdk_pixbuf-2.0"
+        $compileCommand += " -lcairo -lpango-1.0 -lpangocairo-1.0 -lcurl -ljson-c"
+        $compileCommand += " -mwindows -Wl,-subsystem,windows"
+        
+        Write-Host "Compile command: $compileCommand"
+        
+        # Buat direktori build jika belum ada
+        if (-not (Test-Path "build")) {
+            New-Item -Path "build" -ItemType Directory -Force
+        }
+        
+        # Compile dengan verbose output
+        $result = Invoke-Expression $compileCommand 2>&1
+        Write-Host "Compilation result: $result"
+        
+        if (Test-Path "build/phishing.exe") {
+            Write-Host "phishing.exe created successfully in build directory"
+            # Buat salinan di direktori utama untuk kompatibilitas dengan langkah berikutnya
+            Copy-Item -Path "build/phishing.exe" -Destination "phishing.exe" -Force
+        }
+        else {
+            Write-Host "Failed to create phishing.exe"
+            exit 1
+        }
+
     - name: Create artifacts directory
       shell: pwsh
       run: |
+        # Buat direktori artifacts jika belum ada
         New-Item -Path "${{ github.workspace }}\artifacts" -ItemType Directory -Force
-        Copy-Item -Path "phishing.exe" -Destination "${{ github.workspace }}\artifacts\" -Force
+        
+        # Salin phishing.exe ke artifacts
+        if (Test-Path "build/phishing.exe") {
+            Copy-Item -Path "build/phishing.exe" -Destination "${{ github.workspace }}\artifacts\" -Force
+            Write-Host "Copied phishing.exe to artifacts directory"
+        }
+        elseif (Test-Path "phishing.exe") {
+            Copy-Item -Path "phishing.exe" -Destination "${{ github.workspace }}\artifacts\" -Force
+            Write-Host "Copied phishing.exe to artifacts directory"
+        }
+        else {
+            Write-Host "Cannot find phishing.exe to copy to artifacts"
+            exit 1
+        }
 
     - name: Commit and Push phishing.exe
       shell: pwsh
@@ -107,22 +185,23 @@ jobs:
         git config --global user.name "github-actions"
         git config --global user.email "github-actions@github.com"
         
-        # Create build directory if it doesn't exist
-        New-Item -Path "build" -ItemType Directory -Force
-        
-        # Copy the compiled executable to the build directory
-        Copy-Item -Path "phishing.exe" -Destination "build\phishing.exe" -Force
-        
-        # Add the file to git
-        git add build/phishing.exe
-        
-        # Check if there are changes to commit
-        $status = git status --porcelain
-        if ($status) {
-          git commit -m "Auto-commit: Add compiled phishing.exe"
-          git push
+        # Pastikan file ada
+        if (Test-Path "build/phishing.exe") {
+            # Add the file to git
+            git add build/phishing.exe
+            
+            # Check if there are changes to commit
+            $status = git status --porcelain
+            if ($status) {
+                git commit -m "Auto-commit: Add compiled phishing.exe"
+                git push
+                Write-Host "Committed and pushed phishing.exe"
+            } else {
+                Write-Host "No changes to commit"
+            }
         } else {
-          Write-Host "No changes to commit"
+            Write-Host "phishing.exe not found in build directory"
+            exit 1
         }
 
     - name: Create Release Body
@@ -161,7 +240,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: phishing.exe
+        files: build/phishing.exe
         body: ${{ steps.release_body.outputs.body }}
         tag_name: ${{ github.ref }}
         name: "v${{ github.ref_name }} Release"
