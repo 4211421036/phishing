@@ -123,20 +123,22 @@ jobs:
         Get-ChildItem -Path "${{ env.GTK_INCLUDE }}" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
         
         # Compile dengan verbose output
-        $compileCommand = "gcc main.c resource.o -o build/phishing.exe"
-        $compileCommand += " -I`"${{ env.GTK_INCLUDE }}`""
-        $compileCommand += " -I`"${{ env.GLIB_INCLUDE }}`""
-        $compileCommand += " -I`"${{ env.GLIB_LIB_INCLUDE }}`""
-        $compileCommand += " -I`"C:\vcpkg\installed\x64-windows\include`""
-        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\cairo`""
-        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\pango-1.0`""
-        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\atk-1.0`""
-        $compileCommand += " -I`"${{ env.GTK_DIR }}\include\gdk-pixbuf-2.0`""
-        $compileCommand += " -L`"${{ env.GTK_LIB_DIR }}`""
-        $compileCommand += " -L`"C:\vcpkg\installed\x64-windows\lib`""
-        $compileCommand += " -lgtk-3 -lgobject-2.0 -lglib-2.0 -lgio-2.0 -lgdk-3 -lgdk_pixbuf-2.0"
-        $compileCommand += " -lcairo -lpango-1.0 -lpangocairo-1.0 -lcurl -ljson-c"
-        $compileCommand += " -mwindows -Wl,-subsystem,windows"
+        $compileCommand = @"
+        gcc main.c resource.o -o build/phishing.exe `
+        -I"${{ env.GTK_INCLUDE }}" `
+        -I"${{ env.GLIB_INCLUDE }}" `
+        -I"${{ env.GLIB_LIB_INCLUDE }}" `
+        -I"C:\vcpkg\installed\x64-windows\include" `
+        -I"${{ env.GTK_DIR }}\include\cairo" `
+        -I"${{ env.GTK_DIR }}\include\pango-1.0" `
+        -I"${{ env.GTK_DIR }}\include\atk-1.0" `
+        -I"${{ env.GTK_DIR }}\include\gdk-pixbuf-2.0" `
+        -L"${{ env.GTK_LIB_DIR }}" `
+        -L"C:\vcpkg\installed\x64-windows\lib" `
+        -lgtk-3 -lgobject-2.0 -lglib-2.0 -lgio-2.0 -lgdk-3 -lgdk_pixbuf-2.0 `
+        -lcairo -lpango-1.0 -lpangocairo-1.0 -lcurl -ljson-c `
+        -mwindows -Wl,-subsystem,windows
+        "@
         
         Write-Host "Compile command: $compileCommand"
         
@@ -145,7 +147,7 @@ jobs:
             New-Item -Path "build" -ItemType Directory -Force
         }
         
-        # Compile dengan verbose output
+        # Jalankan perintah kompilasi
         try {
             Invoke-Expression $compileCommand 2>&1 | Tee-Object -Variable result
             Write-Host "Compilation result: $result"
