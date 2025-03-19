@@ -51,6 +51,9 @@ jobs:
         echo "C:\vcpkg\installed\x64-windows\include" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         echo "C:\vcpkg\installed\x64-windows\lib" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+        # Add GTK to PATH
+        echo "C:\tools\gtk3\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
     - name: Compile resource file
       shell: pwsh
       run: |
@@ -71,6 +74,7 @@ jobs:
           -IC:/tools/gtk3/lib/glib-2.0/include ^
           -LC:/tools/gtk3/lib ^
           -LC:/vcpkg/installed/x64-windows/lib ^
+          -LC:/tools/gtk3/bin ^
           -lgtk-3 -lgobject-2.0 -lglib-2.0 ^
           -lcurl -ljson-c ^
           -mwindows -Wl,-subsystem,windows
