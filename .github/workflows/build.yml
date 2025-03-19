@@ -30,51 +30,17 @@ jobs:
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
         iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
         
-        # Install build tools
+        # Install build tools and GTK using Chocolatey
         choco install -y mingw curl
+        choco install -y msys2
+        refreshenv
         
-        # Install GTK3 manually
-        Invoke-WebRequest -Uri "https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases/download/2023-01-03/gtk3-runtime-3.24.31-2023-01-03-ts-win64.exe" -OutFile "gtk3-runtime.exe"
-        Start-Process -FilePath "gtk3-runtime.exe" -ArgumentList "/S" -Wait
+        # Install GTK3 using MSYS2
+        C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-gtk3"
         
         # Install vcpkg and json-c
         choco install -y vcpkg
         vcpkg install json-c
-
-    - name: Verify GTK Installation
-      shell: pwsh
-      run: |
-        # Check where GTK is actually installed
-        $possiblePaths = @(
-          "C:\Program Files\GTK3-Runtime Win64\bin",
-          "C:\gtk3\bin",
-          "C:\Program Files\gtk3\bin",
-          "C:\tools\gtk3\bin"
-        )
-        
-        $gtkPath = $null
-        foreach ($path in $possiblePaths) {
-          if (Test-Path $path) {
-            $gtkPath = $path
-            Write-Host "GTK installation found at $gtkPath"
-            break
-          }
-        }
-        
-        if ($null -eq $gtkPath) {
-          Write-Host "GTK installation not found in any expected location"
-          
-          # List all Program Files directories to help debug
-          Write-Host "Listing Program Files directories:"
-          Get-ChildItem "C:\Program Files" | ForEach-Object { Write-Host $_.FullName }
-          
-          exit 1
-        }
-        
-        # Set the GTK_DIR environment variable
-        $gtkDir = (Get-Item $gtkPath).Parent.FullName
-        Write-Host "Setting GTK_DIR=$gtkDir"
-        echo "GTK_DIR=$gtkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - name: Setup Environment
       shell: pwsh
@@ -82,55 +48,51 @@ jobs:
         # Add MinGW to PATH
         echo "C:\tools\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         
-        # Add GTK to PATH
-        echo "${{ env.GTK_DIR }}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # Add MSYS2/MinGW GTK paths
+        echo "C:\tools\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "C:\tools\msys64\mingw64\include" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        echo "C:\tools\msys64\mingw64\lib" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         
-        # Create pkgconfig directory if it doesn't exist
-        $pkgConfigDir = "${{ env.GTK_DIR }}\lib\pkgconfig"
-        if (-not (Test-Path $pkgConfigDir)) {
-          New-Item -Path $pkgConfigDir -ItemType Directory -Force
-        }
-        
-        # Set PKG_CONFIG_PATH for GTK
-        $env:PKG_CONFIG_PATH = $pkgConfigDir
-        echo "PKG_CONFIG_PATH=$env:PKG_CONFIG_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
         # Add vcpkg paths
         echo "C:\vcpkg\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         echo "C:\vcpkg\installed\x64-windows\include" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         echo "C:\vcpkg\installed\x64-windows\lib" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         
-        # List GTK directory structure for debugging
-        Write-Host "GTK Directory Structure:"
-        Get-ChildItem -Path "${{ env.GTK_DIR }}" -Recurse -Depth 2 | ForEach-Object { Write-Host $_.FullName }
+        # Set GTK environment variables
+        $gtkDir = "C:\tools\msys64\mingw64"
+        echo "GTK_DIR=$gtkDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        echo "GTK_INCLUDE=$gtkDir\include\gtk-3.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        echo "GLIB_INCLUDE=$gtkDir\include\glib-2.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        echo "GLIB_LIB_INCLUDE=$gtkDir\lib\glib-2.0\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        echo "GTK_LIB_DIR=$gtkDir\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        
+        # Set PKG_CONFIG_PATH
+        $env:PKG_CONFIG_PATH = "$gtkDir\lib\pkgconfig"
+        echo "PKG_CONFIG_PATH=$env:PKG_CONFIG_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-    - name: Find GTK Include Directories
-      id: find_gtk_includes
+    - name: Verify GTK Installation
       shell: pwsh
       run: |
-        # Find gtk.h location
-        $gtkHeaderPaths = Get-ChildItem -Path "C:\" -Recurse -ErrorAction SilentlyContinue -Filter "gtk.h" | Where-Object { $_.FullName -like "*gtk-3.0*" }
-        
-        if ($gtkHeaderPaths.Count -gt 0) {
-          $gtkIncludeDir = (Get-Item $gtkHeaderPaths[0].Directory).Parent.Parent.FullName
-          $gtkIncludePath = "$gtkIncludeDir\include\gtk-3.0"
-          $glibIncludePath = "$gtkIncludeDir\include\glib-2.0"
-          $glibLibIncludePath = "$gtkIncludeDir\lib\glib-2.0\include"
-          
-          Write-Host "GTK Include Directory: $gtkIncludePath"
-          Write-Host "GLib Include Directory: $glibIncludePath"
-          Write-Host "GLib Lib Include Directory: $glibLibIncludePath"
-          
-          echo "GTK_INCLUDE=$gtkIncludePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "GLIB_INCLUDE=$glibIncludePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "GLIB_LIB_INCLUDE=$glibLibIncludePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "GTK_LIB_DIR=$gtkIncludeDir\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        # Check for GTK files
+        $gtkHeader = "${{ env.GTK_INCLUDE }}\gtk\gtk.h"
+        if (Test-Path $gtkHeader) {
+          Write-Host "GTK headers found at $gtkHeader"
         } else {
-          Write-Host "gtk.h not found. Manually setting paths based on typical installation."
-          echo "GTK_INCLUDE=${{ env.GTK_DIR }}\include\gtk-3.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "GLIB_INCLUDE=${{ env.GTK_DIR }}\include\glib-2.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "GLIB_LIB_INCLUDE=${{ env.GTK_DIR }}\lib\glib-2.0\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "GTK_LIB_DIR=${{ env.GTK_DIR }}\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "GTK headers not found at $gtkHeader"
+          Write-Host "Listing GTK directory contents:"
+          Get-ChildItem -Path "${{ env.GTK_DIR }}" -Recurse -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+          exit 1
+        }
+        
+        # Check for libraries
+        $gtkLib = "${{ env.GTK_LIB_DIR }}\libgtk-3.dll.a"
+        if (Test-Path $gtkLib) {
+          Write-Host "GTK library found at $gtkLib"
+        } else {
+          Write-Host "GTK library not found at $gtkLib"
+          Write-Host "Listing lib directory:"
+          Get-ChildItem -Path "${{ env.GTK_LIB_DIR }}" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+          exit 1
         }
 
     - name: Create resource.rc if not exists
@@ -138,45 +100,45 @@ jobs:
       run: |
         if (-not (Test-Path "resource.rc")) {
           @"
-          // Microsoft Visual C++ generated resource script.
-          //
-          #include <windows.h>
-          
-          VS_VERSION_INFO VERSIONINFO
-           FILEVERSION 1,0,0,1
-           PRODUCTVERSION 1,0,0,1
-           FILEFLAGSMASK 0x3fL
-          #ifdef _DEBUG
-           FILEFLAGS 0x1L
-          #else
-           FILEFLAGS 0x0L
-          #endif
-           FILEOS 0x40004L
-           FILETYPE 0x1L
-           FILESUBTYPE 0x0L
-          BEGIN
-              BLOCK "StringFileInfo"
-              BEGIN
-                  BLOCK "040904b0"
-                  BEGIN
-                      VALUE "CompanyName", "Security Tool"
-                      VALUE "FileDescription", "Phishing Detection Tool"
-                      VALUE "FileVersion", "1.0.0.1"
-                      VALUE "InternalName", "phishing.exe"
-                      VALUE "LegalCopyright", "Copyright (C) 2025"
-                      VALUE "OriginalFilename", "phishing.exe"
-                      VALUE "ProductName", "Phishing Detection"
-                      VALUE "ProductVersion", "1.0.0.1"
-                  END
-              END
-              BLOCK "VarFileInfo"
-              BEGIN
-                  VALUE "Translation", 0x409, 1200
-              END
-          END
-          
-          IDI_ICON1 ICON "icon.ico"
-          "@ | Out-File -FilePath "resource.rc" -Encoding utf8
+// Microsoft Visual C++ generated resource script.
+//
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,1
+ PRODUCTVERSION 1,0,0,1
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Security Tool"
+            VALUE "FileDescription", "Phishing Detection Tool"
+            VALUE "FileVersion", "1.0.0.1"
+            VALUE "InternalName", "phishing.exe"
+            VALUE "LegalCopyright", "Copyright (C) 2025"
+            VALUE "OriginalFilename", "phishing.exe"
+            VALUE "ProductName", "Phishing Detection"
+            VALUE "ProductVersion", "1.0.0.1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+IDI_ICON1 ICON "icon.ico"
+"@ | Out-File -FilePath "resource.rc" -Encoding utf8
         }
         
         if (-not (Test-Path "icon.ico")) {
@@ -197,26 +159,35 @@ jobs:
         }
 
     - name: Compile Application
-      shell: cmd
+      shell: pwsh
       run: |
-        gcc main.c resource.o -o phishing.exe ^
-          -I${{ env.GTK_INCLUDE }} ^
-          -I${{ env.GLIB_INCLUDE }} ^
-          -I${{ env.GLIB_LIB_INCLUDE }} ^
-          -IC:\vcpkg\installed\x64-windows\include ^
-          -L${{ env.GTK_LIB_DIR }} ^
-          -LC:\vcpkg\installed\x64-windows\lib ^
-          -L${{ env.GTK_DIR }}\bin ^
-          -lgtk-3 -lgobject-2.0 -lglib-2.0 ^
-          -lcurl -ljson-c ^
+        $compileCommand = @"
+        gcc main.c resource.o -o phishing.exe `
+          -I"${{ env.GTK_INCLUDE }}" `
+          -I"${{ env.GLIB_INCLUDE }}" `
+          -I"${{ env.GLIB_LIB_INCLUDE }}" `
+          -I"C:\vcpkg\installed\x64-windows\include" `
+          -I"${{ env.GTK_DIR }}\include\cairo" `
+          -I"${{ env.GTK_DIR }}\include\pango-1.0" `
+          -I"${{ env.GTK_DIR }}\include\atk-1.0" `
+          -I"${{ env.GTK_DIR }}\include\gdk-pixbuf-2.0" `
+          -L"${{ env.GTK_LIB_DIR }}" `
+          -L"C:\vcpkg\installed\x64-windows\lib" `
+          -L"${{ env.GTK_DIR }}\bin" `
+          -lgtk-3 -lgobject-2.0 -lglib-2.0 -lgio-2.0 -lgdk-3 -lgdk_pixbuf-2.0 -lcairo -lpango-1.0 -lpangocairo-1.0 `
+          -lcurl -ljson-c `
           -mwindows -Wl,-subsystem,windows
-          
-        if exist phishing.exe (
-          echo phishing.exe created successfully
-        ) else (
-          echo Failed to create phishing.exe
-          exit /b 1
-        )
+        "@
+        
+        Write-Host "Compile command: $compileCommand"
+        Invoke-Expression $compileCommand
+        
+        if (Test-Path "phishing.exe") {
+          Write-Host "phishing.exe created successfully"
+        } else {
+          Write-Host "Failed to create phishing.exe"
+          exit 1
+        }
 
     - name: Create artifacts directory
       shell: pwsh
@@ -276,7 +247,9 @@ jobs:
         Based on: *Entropy Based Method for Malicious File Detection*  
         Journal of Informatics Visualization, 6(4) 856-861
         "@
-        echo "body=$body" >> $env:GITHUB_OUTPUT
+        
+        $escapedBody = $body -replace '%', '%25' -replace "`n", '%0A' -replace "`r", '' -replace '`', "''"
+        echo "body=$escapedBody" >> $env:GITHUB_OUTPUT
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
