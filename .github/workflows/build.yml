@@ -32,13 +32,18 @@ jobs:
     - name: Install MinGW
       shell: pwsh
       run: |
-        choco install mingw -y
+        choco install -y mingw gtk3 curl json-c
 
     # Langkah 4: Set PATH untuk MinGW
-    - name: Set PATH for MinGW
+    - name: Setup Environment
       shell: pwsh
       run: |
+        # Add MinGW to PATH
         echo "C:\tools\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+        # Set PKG_CONFIG_PATH for GTK
+        $env:PKG_CONFIG_PATH = "C:\tools\gtk3\lib\pkgconfig"
+        echo "PKG_CONFIG_PATH=$env:PKG_CONFIG_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     # Langkah 5: Kompilasi resource file
     - name: Compile resource file
@@ -52,6 +57,18 @@ jobs:
           exit 1
         }
 
+    - name: Compile Application
+      shell: pwsh
+      run: |
+        gcc main.c -o phishing.exe `
+          -IC:/tools/gtk3/include/gtk-3.0 `
+          -IC:/tools/gtk3/include/glib-2.0 `
+          -IC:/tools/gtk3/lib/glib-2.0/include `
+          -LC:/tools/gtk3/lib `
+          -lgtk-3 -lgobject-2.0 -lglib-2.0 `
+          -lcurl -ljson-c `
+          -mwindows -Wl,-subsystem,windows
+    
     # Langkah 6: Kompilasi program C
     - name: Compile C code
       shell: pwsh
@@ -94,3 +111,42 @@ jobs:
         } else {
           Write-Host "No changes to commit"
         }
+
+    - name: Create Release Body
+      id: release_body
+      shell: pwsh
+      run: |
+        $body = @"
+        ## Entropy-Based Malicious File Detection
+        
+        ### Implemented Algorithms
+        
+        **Shannon Entropy**:
+        $$ H_{\theta}(x) = \sum_{i=1}^{n} p(x_i) \log_{\theta} \frac{1}{p(x_i)} $$
+        
+        **Renyi Entropy**:
+        $$ H_{\theta}(x) = \frac{1}{1-\theta} \log_{\theta} \left(\sum_{i=1}^{n} p(x_i)^\theta\right) $$
+        
+        **Tsallis Entropy**:
+        $$ H_{\theta}(x) = \frac{1}{1-\theta} \left(\sum_{i=1}^{n} p(x_i)^\theta - 1\right) $$
+        
+        ### Key Features
+        - Hybrid entropy analysis (Shannon + Renyi + Tsallis)
+        - Header entropy validation (256 bytes)
+        - Ransomware pattern detection
+        - GUI interface with GTK
+        - Auto-update mechanism
+        
+        Based on: *Entropy Based Method for Malicious File Detection*  
+        Journal of Informatics Visualization, 6(4) 856-861
+        "@
+        echo "body=$body" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: phishing.exe
+        body: ${{ steps.release_body.outputs.body }}
+        tag_name: ${{ github.ref }}
+        name: "v${{ github.ref_name }} Release"
